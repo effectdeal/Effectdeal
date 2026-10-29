@@ -4,6 +4,7 @@ from pathlib import Path
 from flask import Flask, jsonify, render_template, request
 from werkzeug.security import generate_password_hash
 from .storage import SQLiteStore, MongoStore, Conflict
+from .domain.employees import username
 
 def create_app(config=None):
     app = Flask(__name__)
@@ -19,7 +20,8 @@ def create_app(config=None):
         if not store.get('company','employees','owner'):
             email,password=os.getenv('OWNER_EMAIL',''),os.getenv('OWNER_PASSWORD','')
             if not email or len(password)<12: raise RuntimeError('Configure OWNER_EMAIL and OWNER_PASSWORD (12+ chars).')
-            store.create('company','employees',{'id':'owner','name':'Majitel','email':email.lower(),'role':'owner','hourlyRate':0,'available':True,'passwordHash':generate_password_hash(password)})
+            login=username(os.getenv('OWNER_USERNAME') or email)
+            store.create('company','employees',{'id':'owner','name':'Majitel','firstName':'Majitel','lastName':'','phone':'','username':login,'email':email.strip().lower(),'role':'owner','hourlyRate':0,'available':True,'passwordHash':generate_password_hash(password)})
     else:
         store=SQLiteStore(app.config['DATABASE'])
     app.extensions['store']=store
