@@ -98,6 +98,13 @@ def validate(kind,payload,old=None):
         for key in ('brand','model','plate'):
             if not str(r.get(key,'')).strip():raise ValueError('Vyplňte značku, model a SPZ.')
         r.setdefault('status','available');r.setdefault('monthlyPrice',0)
+        profile_id=r.get('profileDocumentId')
+        if profile_id:
+            photo=store().get(g.tenant,'documents',profile_id)
+            if (not photo or photo.get('parentKind')!='vehicles'
+                    or photo.get('parentId')!=r.get('id')
+                    or photo.get('mime') not in ('image/jpeg','image/png','image/webp')):
+                raise ValueError('Profilová fotografie musí patřit tomuto vozidlu.')
     for key,target in [('employeeId','employees'),('vehicleId','vehicles'),('customerId','customers'),('rentalId','rentals'),('transferId','transfers')]:
         if r.get(key) and not store().get(g.tenant,target,r[key]):raise ValueError('Navázaný záznam neexistuje: '+key)
     if kind=='rentals':
@@ -167,6 +174,9 @@ def listing(kind):
     rows=[public(r) for r in store().list(g.tenant,kind) if scoped(kind,r)]
     search=request.args.get('q','').lower();status=request.args.get('status');employee=request.args.get('employeeId')
     rows=[r for r in rows if (not search or search in str(r).lower()) and (not status or r.get('status')==status) and (not employee or r.get('employeeId')==employee)]
+    if kind=='documents':
+        for key in ('parentKind','parentId'):
+            if request.args.get(key):rows=[r for r in rows if r.get(key)==request.args[key]]
     rows.sort(key=lambda r:r.get('updatedAt',r.get('createdAt','')),reverse=True)
     limit=min(max(int(request.args.get('limit',50)),1),100);offset=max(int(request.args.get('offset',0)),0)
     return jsonify(items=rows[offset:offset+limit],total=len(rows))
@@ -250,12 +260,21 @@ def upload():
     if count>=10:raise ValueError('Nejvýše 10 příloh na záznam.')
     # Files stay behind authenticated API; Mongo document is capped below 16 MB.
     r=store().create(g.tenant,'documents',{'id':uuid4().hex,'parentKind':kind,'parentId':id,'name':f.filename[:150],'mime':mime,'size':len(content),'createdAt':now(),'content':base64.b64encode(content).decode()})
+    if kind=='vehicles':
+        # First uploaded image becomes the cover; later uploads preserve the choice.
+        vehicle=store().get(g.tenant,'vehicles',id)
+        if not vehicle.get('profileDocumentId'):
+            vehicle['profileDocumentId']=r['id'];vehicle['updatedAt']=now()
+            try:store().update(g.tenant,'vehicles',vehicle,vehicle['version'])
+            except Conflict:pass  # A concurrent edit wins; the uploaded image remains selectable.
     return jsonify(public(r)),201
 @api.get('/documents/<id>/file')
 @login_required
 def document_file(id):
     r=get_record('documents',id)
-    return Response(base64.b64decode(r['content']),mimetype=r['mime'],headers={'Content-Disposition':"attachment; filename=document"})
+    image=r['mime'] in ('image/jpeg','image/png','image/webp')
+    disposition='inline' if image and request.args.get('download')!='1' else 'attachment'
+    return Response(base64.b64decode(r['content']),mimetype=r['mime'],headers={'Content-Disposition':disposition+'; filename=document'})
 
 @api.errorhandler(400)
 @api.errorhandler(401)
