@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: effectdeal
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn wsgi:app --bind 0.0.0.0:$PORT --workers 1 --threads 4 --timeout 60
+    healthCheckPath: /api/health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.8
+      - key: APP_MODE
+        value: demo
+      - key: SECRET_KEY
+        generateValue: true
