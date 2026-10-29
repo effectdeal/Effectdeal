@@ -1,0 +1,14 @@
+EFFECT DEAL 0.2
+
+1. Rozbal ZIP. Do GitHubu nahraj ROZBALENÉ soubory a složky, nikoli samotný ZIP.
+2. Zachovej cesty: app, docs, tests, scripts a soubory v kořeni.
+3. Fotografie jsou v app/data/vehicle-photos. Nahraj je přes Upload files;
+   při limitu počtu souborů nahraj první a druhou polovinu zvlášť do stejné složky.
+4. Render: Manual Deploy -> Deploy latest commit. Root Directory nech prázdné.
+5. V appce jako majitel: Vozový park -> Import nabídky z webu -> Převést celou nabídku.
+6. Nabídky se uloží se stavem K doplnění; doplň skutečnou SPZ, VIN a dostupnost.
+
+Podrobný návod: docs/AKTUALIZACE_0_2.md
+Konfigurace reálného přihlášení a MongoDB: README.md
+
+Tento balíček sám nic nenasazuje ani nemaže databázi.
