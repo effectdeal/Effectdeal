@@ -3,6 +3,7 @@
 Tato dodávka je spustitelný základ 0.1, nikoliv dokončený podnikový informační systém.
 
 ## Implementováno
+- Profilová fotografie vozidla z jeho galerie, obrazové náhledy a zvětšení fotografií přímo v aplikaci.
 - Python/Render startup, zdravotní endpoint, přihlášení a serverová oprávnění.
 - Oddělený demo prostor, produkční MongoDB adaptér a vytvoření prvního majitele z prostředí.
 - Responzivní shell, lazy moduly, rušení starých požadavků, stav chyby a opakování.
@@ -28,7 +29,7 @@ Tato dodávka je spustitelný základ 0.1, nikoliv dokončený podnikový inform
 ## Obchodní moduly k rozšíření
 - Kontrola překryvů rezervací, automatické ceny prodloužení, smlouvy a verzování protokolů.
 - Skutečná obsazenost, ziskovost vozidel, finanční přehledy za týden/měsíc/rok a exporty.
-- Oddělený profilový obrázek vozidla, náhledy fotografií, mazání a popisy příloh.
+- Generování menších obrazových náhledů na serveru, mazání a vlastní popisy příloh.
 - Generování faktur/PDF, účetní pravidla, párování bankovních pohybů a výplatní integrace.
 - Automatické GPS sledování pouze s jasným souhlasem a pravidly; plánování tras.
 - Kvalifikované elektronické podpisy či ověření identity (kreslený podpis v 0.1 jimi není).
