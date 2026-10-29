@@ -1,0 +1,3 @@
+import {list} from '../core/api.js';
+import {heading,table,esc} from '../core/ui.js';
+export async function render({signal}){const {items}=await list('documents',signal);return {html:heading('Dokumenty','Doklady, smlouvy a fotografie navázané na konkrétní záznam.')+`<section class="card">${table(['Soubor','Vazba','Velikost',''],items.map(d=>`<tr><td>${esc(d.name)}</td><td>${esc(({reports:'Výkaz',vehicles:'Vozidlo',rentals:'Pronájem',handover:'Předávací protokol'})[d.parentKind])}</td><td>${Math.round(d.size/1024)} kB</td><td><a href="/api/documents/${d.id}/file">Stáhnout ↗</a></td></tr>`))}</section><p class="note">Dokumenty přidávejte v detailu výkazu, vozidla nebo předávacího protokolu. Přístup je řízený oprávněními jejich záznamu.</p>`}}
