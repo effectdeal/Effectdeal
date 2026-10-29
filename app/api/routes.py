@@ -3,10 +3,12 @@ import functools
 import secrets
 from datetime import datetime, timezone
 from uuid import uuid4
+from pathlib import Path
 from flask import Blueprint, current_app, g, jsonify, request, session, abort, Response
 from werkzeug.security import check_password_hash, generate_password_hash
 from ..domain.calculations import number, report_totals
 from ..domain.seeds import seed
+from ..domain.employees import profile, username
 from ..storage import Conflict
 
 api=Blueprint('api',__name__)
@@ -15,7 +17,13 @@ ROLES={'owner','manager','dispatcher','employee'}
 STAFF={'owner','manager','dispatcher'}
 def store(): return current_app.extensions['store']
 def now(): return datetime.now(timezone.utc).isoformat()
-def public(record): return {k:v for k,v in record.items() if k not in ('passwordHash','content')}
+def public(record,kind=None):
+    if kind=='employees' or ('role' in record and 'email' in record):record=profile(record)
+    r={k:v for k,v in record.items() if k not in ('passwordHash','password','content')}
+    # Personal roles do not receive company prices, even in API responses.
+    if getattr(g,'user',None) and g.user.get('role') not in STAFF and kind=='vehicles':
+        for key in ('monthlyPrice','priceOriginal','promoLabel'):r.pop(key,None)
+    return r
 def csrf():
     if request.method not in ('GET','HEAD','OPTIONS') and (not session.get('csrf') or request.headers.get('X-CSRF-Token')!=session.get('csrf')):
         abort(403,description='Obnovte stránku a zkuste to znovu.')
@@ -24,22 +32,30 @@ def login_required(fn):
     def wrapped(*args,**kwargs):
         if not session.get('user'): abort(401,description='Přihlaste se prosím.')
         g.tenant=session['tenant'];g.user=store().get(g.tenant,'employees',session['user'])
-        if not g.user or g.user.get('disabled'): abort(401)
+        if not g.user or g.user.get('disabled') or g.user.get('role') not in ROLES: abort(401)
         csrf();return fn(*args,**kwargs)
     return wrapped
 
 def scoped(kind,r):
     role=g.user['role'];uid=g.user['id']
-    if kind=='notifications': return r.get('recipient') in (uid,role)
+    if kind=='notifications': return r.get('recipient')==uid or (role in STAFF and r.get('recipient')==role)
+    if kind=='documents':
+        parent_kind=r.get('parentKind')
+        if parent_kind not in ('employees','reports','vehicles','handover','rentals'):return False
+        parent=store().get(g.tenant,parent_kind,r.get('parentId',''))
+        if not parent:return False
+        if parent_kind=='employees':return private_profile(parent)
+        return scoped(parent_kind,parent)
     if kind in ('invoices','payments') and role not in ('owner','manager'):return False
     if role in STAFF: return True
     if kind=='employees': return r['id']==uid
     if kind in ('reports','transfers','handover'): return r.get('employeeId')==uid
     if kind=='vehicles': return any(t.get('employeeId')==uid and t.get('vehicleId')==r['id'] for t in store().list(g.tenant,'transfers'))
-    if kind=='documents':
-        parent=store().get(g.tenant,r.get('parentKind',''),r.get('parentId',''))
-        return parent is not None and scoped(r['parentKind'],parent)
     return False
+
+def private_profile(employee):
+    return (employee['id']==g.user['id'] or g.user['role']=='owner'
+            or (g.user['role']=='manager' and employee.get('role')!='owner'))
 
 def get_record(kind,id):
     if kind not in KINDS: abort(404)
@@ -61,7 +77,7 @@ def writable(kind,r=None):
     elif role not in STAFF: abort(403)
 
 FIELDS={
- 'employees':{'name','email','role','hourlyRate','available','latitude','longitude','locationConfirmedAt','disabled','password'},
+ 'employees':{'name','firstName','lastName','phone','username','position','email','role','hourlyRate','available','latitude','longitude','locationConfirmedAt','disabled','password'},
  'vehicles':{'brand','model','plate','vin','year','color','drive','fuel','transmission','power','equipment','description','status','monthlyPrice','location','latitude','longitude','odometer','defects','lastRentalEnd','profileDocumentId'},
  'customers':{'name','type','email','phone','address','companyId','note'},
  'rentals':{'customerId','vehicleId','start','end','monthlyPrice','deposit','status','note'},
@@ -75,11 +91,21 @@ FIELDS={
 NUMERIC={'hourlyRate','monthlyPrice','deposit','power','year','odometer','odometerStart','odometerEnd','amount','cost','completedTasks','weekendBonus','holidayBonus','reward','overtimeMinutes'}
 def validate(kind,payload,old=None):
     r={**(old or {}),**{k:v for k,v in payload.items() if k in FIELDS[kind]}}
-    for k in NUMERIC & r.keys():r[k]=float(number(r[k]))
+    for k in NUMERIC & r.keys():
+        r[k]=None if kind=='vehicles' and r[k] in (None,'') else float(number(r[k]))
     for k,v in r.items():
         if isinstance(v,str) and len(v)>10000 and k!='signature':raise ValueError('Text je příliš dlouhý.')
     role=g.user['role']
     if kind=='employees':
+        r=profile(r)
+        for key in ('firstName','lastName','email','phone','position'):
+            if not isinstance(r.get(key),str):raise ValueError('Neplatná hodnota profilu: '+key)
+            r[key]=r[key].strip()
+        if not r['firstName'] or (not old and not r['lastName']):raise ValueError('Vyplňte jméno a příjmení.')
+        if not old and not r['phone']:raise ValueError('Vyplňte kontakt (telefon).')
+        if not old and not payload.get('username'):raise ValueError('Vyplňte uživatelské jméno.')
+        r['name']=' '.join(filter(None,[r['firstName'],r['lastName']]))
+        r['username']=username(r['username'])
         if r.get('role','employee') not in ROLES:raise ValueError('Neplatná role.')
         if role!='owner' and r.get('role')=='owner':abort(403)
         if old and old.get('role')=='owner':r['role']='owner';r['disabled']=False
@@ -87,17 +113,19 @@ def validate(kind,payload,old=None):
         if not r.get('name') or '@' not in r.get('email',''):raise ValueError('Vyplňte jméno a e-mail.')
         r['email']=r['email'].strip().lower()
         if any(e['email']==r['email'] and e['id']!=r.get('id') for e in store().list(g.tenant,'employees')):raise ValueError('E-mail již existuje.')
+        if any(profile(e)['username'].lower()==r['username'] and e['id']!=r.get('id') for e in store().list(g.tenant,'employees')):raise ValueError('Uživatelské jméno již existuje.')
         password=r.pop('password',None)
         if password:
-            if len(password)<12:raise ValueError('Heslo musí mít alespoň 12 znaků.')
+            if not isinstance(password,str) or not 12<=len(password)<=200:raise ValueError('Heslo musí mít 12–200 znaků.')
             r['passwordHash']=generate_password_hash(password)
-        if not old and current_app.config['APP_MODE']=='production' and not password:raise ValueError('Nový účet vyžaduje heslo.')
+        if not old and not password:raise ValueError('Nový účet vyžaduje heslo.')
     if kind in ('vehicles','rentals') and role=='dispatcher':
         r['monthlyPrice']=(old or {}).get('monthlyPrice',0)
     if kind=='vehicles':
-        for key in ('brand','model','plate'):
+        for key in ('brand','model') if r.get('sourceSystem')=='effectdeal.com' else ('brand','model','plate'):
             if not str(r.get(key,'')).strip():raise ValueError('Vyplňte značku, model a SPZ.')
         r.setdefault('status','available');r.setdefault('monthlyPrice',0)
+        if r['status']!='unverified' and not str(r.get('plate','')).strip():raise ValueError('Nejdříve doplňte skutečnou SPZ vozidla.')
         profile_id=r.get('profileDocumentId')
         if profile_id:
             photo=store().get(g.tenant,'documents',profile_id)
@@ -109,12 +137,16 @@ def validate(kind,payload,old=None):
         if r.get(key) and not store().get(g.tenant,target,r[key]):raise ValueError('Navázaný záznam neexistuje: '+key)
     if kind=='rentals':
         if not r.get('customerId') or not r.get('vehicleId'):raise ValueError('Vyberte zákazníka a vozidlo.')
+        vehicle=store().get(g.tenant,'vehicles',r['vehicleId'])
+        if vehicle.get('status')=='unverified':raise ValueError('Nejdříve doplňte a ověřte vozidlo z nabídky.')
         if not r.get('start') or not r.get('end') or r['end']<=r['start']:raise ValueError('Konec pronájmu musí být po začátku.')
         r.setdefault('status','reserved')
     if kind=='transfers':
         if not r.get('vehicleId') or not r.get('employeeId') or not r.get('from') or not r.get('to'):raise ValueError('Vyplňte vozidlo, zaměstnance a trasu.')
         rental=store().get(g.tenant,'rentals',r.get('rentalId',''))
         if rental:r['customerId']=rental['customerId'];r['vehicleId']=rental['vehicleId']
+        vehicle=store().get(g.tenant,'vehicles',r['vehicleId'])
+        if vehicle.get('status')=='unverified':raise ValueError('Nejdříve doplňte a ověřte vozidlo z nabídky.')
         r.setdefault('status','assigned')
         if old and old.get('reportId') and any(r.get(k)!=old.get(k) for k in ('employeeId','vehicleId','rentalId')):raise ValueError('Převoz již má výkaz. Přiřazení již nelze měnit.')
     if kind=='reports':
@@ -123,6 +155,9 @@ def validate(kind,payload,old=None):
             if not scoped('transfers',transfer):abort(404)
             r['employeeId']=transfer['employeeId'];r['vehicleId']=transfer['vehicleId']
         if role not in STAFF:r['employeeId']=g.user['id']
+        if role not in STAFF and r.get('vehicleId'):
+            vehicle=store().get(g.tenant,'vehicles',r['vehicleId'])
+            if not scoped('vehicles',vehicle):abort(404)
         r.setdefault('employeeId',g.user['id']);r.setdefault('status','draft')
         if not r.get('title') or not isinstance(r.get('legs'),list) or not 1<=len(r['legs'])<=30:raise ValueError('Výkaz potřebuje název a 1–30 úseků.')
         for leg in r['legs']:
@@ -140,12 +175,12 @@ def validate(kind,payload,old=None):
     return r
 
 @api.get('/health')
-def health():return jsonify(status='ok',app='EFFECT DEAL',version='0.1.0')
+def health():return jsonify(status='ok',app='EFFECT DEAL',version='0.2.0')
 @api.get('/session')
 def session_info():
     session.setdefault('csrf',secrets.token_hex(24))
     user=store().get(session.get('tenant',''), 'employees',session.get('user',''))
-    return jsonify(user=public(user) if user else None,csrf=session['csrf'],mode=current_app.config['APP_MODE'])
+    return jsonify(user=public(user) if user and not user.get('disabled') and user.get('role') in ROLES else None,csrf=session['csrf'],mode=current_app.config['APP_MODE'])
 @api.post('/login')
 def login():
     csrf();p=request.get_json() or {}
@@ -156,8 +191,9 @@ def login():
         seed(store(),tenant);session['tenant']=tenant;session['user']=ids[role]
     else:
         tenant='company';users=store().list(tenant,'employees')
-        u=next((u for u in users if u.get('email')==str(p.get('email','')).strip().lower()),None)
-        if not u or u.get('disabled') or not check_password_hash(u.get('passwordHash',''),p.get('password','')):abort(401,description='Neplatné přihlašovací údaje.')
+        login_name=str(p.get('username',p.get('email',''))).strip().lower()
+        u=next((u for u in users if profile(u)['username'].lower()==login_name),None)
+        if not u or u.get('disabled') or u.get('role') not in ROLES or not check_password_hash(u.get('passwordHash',''),str(p.get('password',''))):abort(401,description='Neplatné přihlašovací údaje.')
         session.clear();session['tenant']=tenant;session['user']=u['id']
     session['csrf']=secrets.token_hex(24)
     return jsonify(user=public(store().get(tenant,'employees',session['user'])),csrf=session['csrf'])
@@ -171,7 +207,7 @@ def logout():
 @login_required
 def listing(kind):
     if kind not in KINDS:abort(404)
-    rows=[public(r) for r in store().list(g.tenant,kind) if scoped(kind,r)]
+    rows=[public(r,kind) for r in store().list(g.tenant,kind) if scoped(kind,r)]
     search=request.args.get('q','').lower();status=request.args.get('status');employee=request.args.get('employeeId')
     rows=[r for r in rows if (not search or search in str(r).lower()) and (not status or r.get('status')==status) and (not employee or r.get('employeeId')==employee)]
     if kind=='documents':
@@ -182,7 +218,7 @@ def listing(kind):
     return jsonify(items=rows[offset:offset+limit],total=len(rows))
 @api.get('/<kind>/<id>')
 @login_required
-def detail(kind,id):return jsonify(public(get_record(kind,id)))
+def detail(kind,id):return jsonify(public(get_record(kind,id),kind))
 @api.post('/<kind>')
 @login_required
 def create(kind):
@@ -244,8 +280,9 @@ def read_notification(id):
 @login_required
 def upload():
     kind=request.form.get('parentKind');id=request.form.get('parentId')
-    if kind not in ('reports','vehicles','handover','rentals'):abort(400)
+    if kind not in ('employees','reports','vehicles','handover','rentals'):abort(400)
     parent=get_record(kind,id)
+    if kind=='employees' and not private_profile(parent):abort(403)
     if kind=='reports' and parent['status'] not in ('draft','returned'):abort(409)
     if kind in ('vehicles','rentals') and g.user['role'] not in STAFF:abort(403)
     f=request.files.get('file')
@@ -275,6 +312,44 @@ def document_file(id):
     image=r['mime'] in ('image/jpeg','image/png','image/webp')
     disposition='inline' if image and request.args.get('download')!='1' else 'attachment'
     return Response(base64.b64decode(r['content']),mimetype=r['mime'],headers={'Content-Disposition':disposition+'; filename=document'})
+
+def catalog_directory():
+    return Path(current_app.config.get('CATALOG_DIRECTORY',Path(current_app.root_path)/'data'))
+
+@api.get('/catalog/effectdeal')
+@login_required
+def catalog_preview():
+    if g.user['role'] not in ('owner','manager'):abort(403)
+    from ..domain.catalog import read_catalog
+    catalog=read_catalog(catalog_directory())
+    items=[]
+    for item in catalog['items']:
+        items.append({k:item.get(k) for k in ('id','sourceSlug','brand','model','year','monthlyPrice','sourceUrl')})
+        items[-1].update(photoCount=len(item['photos']),imported=bool(store().get(g.tenant,'vehicles',item['id'])))
+    return jsonify(items=items,fetchedAt=catalog['fetchedAt'],source=catalog['source'])
+
+@api.post('/catalog/effectdeal/<slug>/import')
+@login_required
+def catalog_import(slug):
+    if g.user['role'] not in ('owner','manager'):abort(403)
+    from ..domain.catalog import read_catalog,import_vehicle
+    catalog=read_catalog(catalog_directory())
+    source=next((r for r in catalog['items'] if r['sourceSlug']==slug),None)
+    if source is None:abort(404)
+    return jsonify(import_vehicle(store(),g.tenant,source,catalog_directory()))
+
+@api.get('/me/summary')
+@login_required
+def personal_summary():
+    uid=g.user['id']
+    reports=[r for r in store().list(g.tenant,'reports') if r.get('employeeId')==uid]
+    approved=[r for r in reports if r.get('status')=='approved']
+    transfers=[r for r in store().list(g.tenant,'transfers') if r.get('employeeId')==uid]
+    return jsonify(reports=len(reports),pending=sum(r.get('status')=='submitted' for r in reports),
+        activeTasks=sum(r.get('status')!='completed' for r in transfers),
+        approvedMinutes=sum(r.get('totals',{}).get('minutes',0) for r in approved),
+        earnedCents=sum(r.get('totals',{}).get('laborCents',0)+r.get('totals',{}).get('bonusCents',0) for r in approved),
+        expenseCents=sum(r.get('totals',{}).get('expenseCents',0) for r in approved))
 
 @api.errorhandler(400)
 @api.errorhandler(401)
