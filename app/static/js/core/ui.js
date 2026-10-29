@@ -1,8 +1,8 @@
 import {request} from './api.js';
 export const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 export const money=n=>new Intl.NumberFormat('cs-CZ',{style:'currency',currency:'CZK',maximumFractionDigits:2}).format(Number(n)||0);
-export const roles={owner:'Majitel',manager:'Manager',dispatcher:'Dispečer',employee:'Zaměstnanec / řidič'};
-export const statuses={unverified:'K doplnění',draft:'Koncept',submitted:'Čeká na schválení',approved:'Schváleno',rejected:'Zamítnuto',returned:'Vráceno k opravě',assigned:'Přiděleno',progress:'Probíhá',completed:'Dokončeno',available:'K dispozici',rented:'Zapůjčeno',service:'V servisu',reserved:'Rezervováno',active:'Aktivní',ended:'Ukončeno',issued:'Vystavena',paid:'Uhrazeno'};
+export const roles={owner:'Majitel',manager:'Manager',dispatcher:'Dispečer',employee:'Zaměstnanec'};
+export const statuses={draft:'Koncept',submitted:'Čeká na schválení',approved:'Schváleno',rejected:'Zamítnuto',returned:'Vráceno k opravě',assigned:'Přiděleno',progress:'Probíhá',completed:'Dokončeno',available:'K dispozici',rented:'Zapůjčeno',service:'V servisu',reserved:'Rezervováno',active:'Aktivní',ended:'Ukončeno',issued:'Vystavena',paid:'Uhrazeno'};
 export const badge=s=>`<span class="badge ${esc(s)}">${esc(statuses[s]||s)}</span>`;
 export const heading=(title,sub,action='')=>`<header class="page-heading"><div><span class="eyebrow">EFFECT DEAL / PRACOVNÍ PROSTOR</span><h1>${esc(title)}</h1><p>${esc(sub)}</p></div>${action}</header>`;
 export const btn=(action,label,id='',primary=false)=>`<button data-action="${action}" data-id="${esc(id)}" class="${primary?'primary':''}">${label}</button>`;
