@@ -116,3 +116,80 @@ dl>.long-data{display:block}dl>.long-data dd{max-width:none;text-align:left;whit
   .login > form { align-self: start; }
   .login input, .login select { font-size: 16px; }
 }
+
+/* EFFECT DEAL: the public site's black, white and orange identity. */
+:root { --ink:#18181b; --muted:#60616b; --line:#e3e3e8; --accent:#f97316; --night:#08080a; --bg:#f3f3f6; }
+body { color:var(--ink); }
+aside { background:#08080a; border-right:1px solid #222; }
+.brand-logo { display:flex; flex-direction:column; align-items:center; padding:0; }
+.brand-logo img { display:block; object-fit:contain; max-width:100%; }
+aside .brand-logo img { width:150px; height:150px; }
+aside .brand-logo small { color:#a1a1aa; font-size:9px; letter-spacing:1.3px; }
+aside .company { display:none; }
+aside nav a { color:#babac3; font-size:13px; border-radius:9px; }
+aside nav a:hover { background:#202024; color:#fff; }
+aside nav a.active { background:linear-gradient(110deg,#f97316,#ea580c); color:#fff; box-shadow:0 5px 18px #f9731633; }
+aside .nav-caption { color:#85858e; margin-top:20px; }
+aside .user { color:#f4f4f5; }
+aside .sidebar-bottom button { background:#202024; border-color:#34343a; color:#eee; }
+.topbar { background:#08080a; color:#f4f4f5; border-bottom:3px solid #f97316; }
+.topbar #menu { background:transparent; color:white; }
+.topbar .avatar { background:#f97316; color:#111; }
+.topbar b { color:white; }
+.language-picker { width:auto; min-width:66px; padding:8px 10px; border:1px solid #45454d; border-radius:8px; background:#202024; color:#fff; font-weight:700; font-size:13px; }
+.login .language-picker { justify-self:end; background:white; color:#18181b; border-color:#d4d4d8; }
+.page-heading h1 { font-weight:800; letter-spacing:-1px; color:#111; }
+.page-heading p,.card p { color:#60616b; }
+.eyebrow { color:#c4510a; font-weight:700; }
+.card { border:1px solid #e3e3e8; box-shadow:0 5px 20px #15151c06; border-radius:14px; }
+.metric { border-top:3px solid #f97316; }
+.metric>span { color:#60616b; font-size:12px; font-weight:600; }
+.metric>strong { color:#18181b; font-weight:800; }
+.metric>small { color:#b84a08; }
+button.primary,.button.primary { background:#f97316; color:#111; border-color:#f97316; font-weight:750; box-shadow:0 4px 12px #f9731626; }
+button.primary:hover,.button.primary:hover { background:#fb923c; }
+.welcome { color:white; background:radial-gradient(ellipse at 90% 0,#68300b 0,transparent 60%),#08080a; border:none; }
+.welcome h2 { color:white; font-weight:800; }
+.welcome p { color:#bcbcc5; }
+.welcome .eyebrow { color:#fb923c; }
+.workflow span { color:#e4e4e7; border-color:#ffffff26; background:#ffffff08; }
+.vehicle { transition:transform .15s,box-shadow .15s; }
+.vehicle:hover { transform:translateY(-3px); box-shadow:0 12px 32px #18181b16; }
+.vehicle-art { background:#e9e9ee; }
+.vehicle-body h2 { font-weight:750; }
+.vehicle-price b { color:#c4510a; }
+.vehicle-price>span { color:#b84a08; font-weight:650; }
+.vehicle-plate { z-index:1; background:#08080ae6; color:white; border-radius:5px; }
+.badge { font-weight:700; font-size:11px; border-radius:6px; }
+.badge.unavailable,.badge.cancelled { color:#9f1239; background:#ffe4e6; }
+.badge.delivering,.badge.progress { color:#9a3412; background:#ffedd5; }
+.badge.delivery_scheduled { color:#1e40af; background:#dbeafe; }
+.badge.available,.badge.completed { color:#166534; background:#dcfce7; }
+.availability-range { font-size:12px; font-weight:650; color:#9f1239!important; }
+label { color:#52525b; font-weight:600; }
+input:focus,select:focus,textarea:focus { outline:2px solid #f97316; outline-offset:2px; }
+[hidden] { display:none!important; }
+.login>section { background:radial-gradient(ellipse at 20% 90%,#4a210d 0,transparent 65%),#08080a; padding:5vh 6vw; }
+.login>section h1 { margin-top:35px; font-weight:800; }
+.login>form { width:min(460px,100%); }
+.login>form h2 { color:#111; font-weight:800; }
+.login .brand-logo { align-items:flex-start; }
+.login .brand-logo img { width:240px; height:240px; }
+@media(max-width:760px) {
+ aside .brand-logo img { width:115px; height:115px; }
+ .topbar { gap:6px; }
+ .topbar>span { overflow:hidden; white-space:nowrap; text-overflow:ellipsis; min-width:0; }
+ .top-actions { flex-shrink:0; gap:10px; }
+ .top-actions>.avatar { display:none; }
+ .language-picker { min-width:61px; font-size:16px; padding:6px; }
+ .login>section { padding:12px 24px; }
+ .login .brand-logo { align-items:center; }
+ .login .brand-logo img { width:130px; height:130px; }
+ .login>form { margin:0 auto 30px; padding:24px; gap:18px; }
+ .login>form h2 { margin-top:0; }
+ .metric>span { font-size:11px; }
+ .vehicle:hover { transform:none; }
+}
+.top-logo { object-fit:contain; flex-shrink:0; }
+.topbar { gap:12px; }
+@media(max-width:760px) { .top-brand-name { display:none; } .topbar { gap:8px; } .top-logo { width:44px; height:44px; } .card p,.page-heading p { font-size:13px; line-height:1.65; } }
