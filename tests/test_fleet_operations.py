@@ -76,3 +76,22 @@ def test_thumbnail_small_and_access_checked_even_with_etag(app):
     assert u.client.get('/api/'+path,headers={'If-None-Match':etag}).status_code==304
     u.role('employee')
     assert u.client.get('/api/'+path,headers={'If-None-Match':etag}).status_code==404
+
+
+def test_only_owner_and_manager_create_vehicle_offers(app):
+    u=User(app.test_client())
+    offer={'brand':'Škoda','model':'Nová nabídka','status':'unverified','monthlyPrice':12500}
+    first=u.post('vehicles',offer)
+    assert first.status_code==201,first.json
+    assert first.json['status']=='unverified'
+    manager=u.post('employees',{'firstName':'Test','lastName':'Manager','phone':'123456789','email':'manager@example.test','username':'testmanager','password':'ExampleOnly12345','role':'manager'}).json
+    with u.client.session_transaction() as session:session['user']=manager['id']
+    assert u.post('vehicles',offer).status_code==201
+    for role in ('dispatcher','employee'):
+        u.role(role)
+        assert u.post('vehicles',offer).status_code==403
+    u.role('dispatcher')
+    vehicle=u.get('vehicles/'+first.json['id']).json
+    edited=u.put('vehicles/'+vehicle['id'],{'version':vehicle['version'],'color':'Černá','monthlyPrice':1})
+    assert edited.status_code==200
+    assert edited.json['color']=='Černá' and edited.json['monthlyPrice']==12500
