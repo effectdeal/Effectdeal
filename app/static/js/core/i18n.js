@@ -1,5 +1,17 @@
 const translations = {};
 const rows = `
+Domovská strana|Home|Startseite
+Nastavení|Settings|Einstellungen
+Import|Import|Import
+Nový vůz|New vehicle|Neues Fahrzeug
+Nabídka vozidel a import dat.|Vehicle offers and data import.|Fahrzeugangebote und Datenimport.
+Vytvořit novou nabídku vozidla|Create a new vehicle offer|Neues Fahrzeugangebot erstellen
+Přidejte vůz, měsíční cenu a technické údaje. Fotografie nahrajete v detailu uloženého vozidla.|Add a vehicle, monthly price and specifications. Upload photos in the saved vehicle details.|Fügen Sie ein Fahrzeug, den Monatspreis und technische Daten hinzu. Fotos laden Sie anschließend in den Fahrzeugdetails hoch.
+Nová nabídka může zůstat ve stavu K doplnění bez SPZ. Před přiřazením k pronájmu nebo převozu doplňte skutečné údaje.|A new offer can remain in Needs details status without a registration plate. Complete the actual details before assigning a rental or transfer.|Ein neues Angebot kann ohne Kennzeichen im Status Angaben ergänzen bleiben. Ergänzen Sie die tatsächlichen Daten vor Zuweisung einer Vermietung oder Überführung.
+＋ Vytvořit nabídku|＋ Create offer|＋ Angebot erstellen
+Nemáte oprávnění vytvářet vozidla.|You do not have permission to create vehicles.|Sie sind nicht berechtigt, Fahrzeuge anzulegen.
+Nemáte přístup k nastavení.|You do not have access to settings.|Sie haben keinen Zugriff auf die Einstellungen.
+
 Probíhá kontrola|Inspection in progress|Kontrolle läuft
 Všechny převozy|All transfers|Alle Überführungen
 Všechny výkazy|All reports|Alle Abrechnungen
