@@ -1,5 +1,6 @@
 import os
 import secrets
+import gzip
 from pathlib import Path
 from flask import Flask, jsonify, render_template, request
 from werkzeug.security import generate_password_hash
@@ -40,9 +41,13 @@ def create_app(config=None):
         response.headers['X-Frame-Options']='DENY'
         response.headers['Content-Security-Policy']="default-src 'self'; img-src 'self' blob: data:; style-src 'self'; script-src 'self'; connect-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
         if request.path.startswith('/api/') or request.path in ('/','/sw.js','/manifest.webmanifest'):
-            response.headers['Cache-Control']='no-store'
+            if response.headers.get('Cache-Control')!='private, no-cache':response.headers['Cache-Control']='no-store'
         else:
             response.headers['Cache-Control']='public, max-age=0, must-revalidate'
+        if ('gzip' in request.headers.get('Accept-Encoding','') and response.mimetype in ('application/json','text/css','text/javascript','application/javascript','text/html') and not response.direct_passthrough and response.status_code==200 and not response.headers.get('Content-Encoding')):
+            body=response.get_data()
+            if len(body)>1024:
+                response.set_data(gzip.compress(body,compresslevel=4));response.headers['Content-Encoding']='gzip';response.vary.add('Accept-Encoding')
         return response
     @app.errorhandler(ValueError)
     def invalid(e): return jsonify(error=str(e)),400

@@ -15,11 +15,11 @@ class SQLiteStore:
         self.conn.execute('CREATE TABLE IF NOT EXISTS records (tenant TEXT, kind TEXT, id TEXT, version INTEGER, data TEXT, PRIMARY KEY(tenant,kind,id))')
         self.conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS employee_username ON records (tenant, json_extract(data, '$.username')) WHERE kind='employees' AND json_extract(data, '$.username') IS NOT NULL")
         self.conn.commit()
-    def list(self, tenant, kind):
+    def list(self, tenant, kind, filters=None):
         with self.lock:
             column="json_remove(data, '$.content')" if kind=='documents' else 'data'
             rows = self.conn.execute(f'SELECT {column} FROM records WHERE tenant=? AND kind=?', (tenant, kind)).fetchall()
-        return [json.loads(r[0]) for r in rows]
+        return [r for row in rows if (r:=json.loads(row[0])) is not None and all(r.get(k)==v for k,v in (filters or {}).items())]
     def get(self, tenant, kind, id):
         with self.lock:
             row = self.conn.execute('SELECT data FROM records WHERE tenant=? AND kind=? AND id=?', (tenant, kind, id)).fetchone()
@@ -53,11 +53,14 @@ class MongoStore:
         self.client.admin.command('ping')
         self.records = self.client[database].records
         self.records.create_index([('tenant',1),('kind',1),('id',1)], unique=True)
+        self.records.create_index([('tenant',1),('kind',1),('data.parentKind',1),('data.parentId',1)])
+        self.records.create_index([('tenant',1),('kind',1),('data.employeeId',1)])
         self.records.create_index([('tenant',1),('data.username',1)], unique=True,
             partialFilterExpression={'kind':'employees','data.username':{'$type':'string'}})
-    def list(self, tenant, kind):
+    def list(self, tenant, kind, filters=None):
         projection={'data.content':0} if kind=='documents' else {'data':1}
-        return [r['data'] for r in self.records.find({'tenant':tenant,'kind':kind}, projection)]
+        query={'tenant':tenant,'kind':kind,**{'data.'+k:v for k,v in (filters or {}).items()}}
+        return [r['data'] for r in self.records.find(query, projection)]
     def get(self, tenant, kind, id):
         r = self.records.find_one({'tenant':tenant,'kind':kind,'id':id})
         return r['data'] if r else None
