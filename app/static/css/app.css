@@ -105,3 +105,14 @@
 
 /* Keep descriptions and equipment readable on a phone. */
 dl>.long-data{display:block}dl>.long-data dd{max-width:none;text-align:left;white-space:pre-line;margin-top:8px}.badge.unverified{background:#fff1dc;color:#9b691d}.metric>strong{overflow-wrap:anywhere}.page-heading .actions{margin-top:0}
+
+/* Keep intrinsic form widths inside the viewport, including iOS Safari. */
+.login { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+.login > section, .login > form, .login label { min-width: 0; }
+.login > form { width: min(420px, 100%); }
+.login input, .login select, .login button { min-width: 0; max-width: 100%; }
+@media (max-width: 760px) {
+  .login { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto 1fr; }
+  .login > form { align-self: start; }
+  .login input, .login select { font-size: 16px; }
+}
