@@ -5,7 +5,7 @@ fields.push({name:'status',label:'Stav',type:'select',options:[['unverified','K 
 fields.push({name:'unavailableFrom',label:'Nedostupné od',type:'date'},{name:'unavailableTo',label:'Nedostupné do',type:'date'});
 const price=value=>value==null?'Cena neuvedena':money(value)+' <small>/ měsíc</small>';
 export async function render({id,signal,refresh,user}){
- const editable=['owner','manager','dispatcher'].includes(user.role),canImport=['owner','manager'].includes(user.role);
+ const editable=['owner','manager','dispatcher'].includes(user.role);
  const editFields=fields.filter(f=>user.role!=='dispatcher'||f.name!=='monthlyPrice');
  if(id){
   const [v,files,history]=await Promise.all([request('/vehicles/'+id,{signal}),documents('vehicles',id,signal),editable?list('service',signal,'&vehicleId='+encodeURIComponent(id)):Promise.resolve({items:[]})]);
@@ -21,10 +21,10 @@ export async function render({id,signal,refresh,user}){
    bind(root){bindUpload(root,refresh,{onProfile:editable?async photoId=>{await request('/vehicles/'+id,{method:'PUT',data:{version:v.version,profileDocumentId:photoId}});toast('Profilová fotografie byla uložena.');refresh()}:undefined});bindActions(root,{edit:()=>vehicleEditor(v,editFields,refresh),unavailable:()=>vehicleEditor(v,editFields,refresh,true),service:()=>simpleEditor('service','Servis vozidla',null,[{name:'vehicleId',label:'Vozidlo',default:id,type:'select',options:[[id,v.plate||v.model]]},{name:'date',label:'Datum',type:'date'},{name:'description',label:'Provedený servis',type:'textarea'},{name:'cost',label:'Náklady (Kč)',type:'number'},{name:'nextDate',label:'Příští servis',type:'date'}],refresh)})}};
  }
  const {items,total}=await list('vehicles',signal);
- return {html:heading(editable?'Vozový park':'Moje vozidla',editable?'Poloha, dostupnost a dokumentace každého vozu.':'Vozidla přiřazená k vašim úkolům.',editable?`<div class="actions">${canImport?'<a class="button" href="#catalog">↓ Import nabídky z webu</a>':''}${btn('new','＋ Přidat vozidlo','',true)}</div>`:'')+
+ return {html:heading(editable?'Vozový park':'Moje vozidla',editable?'Poloha, dostupnost a dokumentace každého vozu.':'Vozidla přiřazená k vašim úkolům.','')+
  `<div class="metrics">${[['Vozidel v přehledu',total],['K dispozici',items.filter(v=>v.status==='available').length],['Zapůjčeno',items.filter(v=>v.status==='rented').length],['K doplnění',items.filter(v=>v.status==='unverified').length]].map(([label,value])=>`<div class="card metric"><span>${label}</span><strong>${value}</strong></div>`).join('')}</div>
  <div class="vehicle-grid">${items.map(v=>`<a class="card vehicle" href="#vehicles/${v.id}"><div class="vehicle-art"><span class="vehicle-plate">${esc(v.plate||'SPZ k doplnění')}</span>${v.profileDocumentId?`<img class="vehicle-profile-image" src="${photoUrl(v.profileDocumentId,true)}" alt="${esc(v.brand+' '+v.model)}" loading="lazy" decoding="async">`:`<svg viewBox="0 0 500 200" aria-hidden="true"><path d="m40 140 15-40 100-15 65-55h125l65 55 50 12 10 55H40Z" fill="#a3afb8"/><path d="m172 86 54-45h47v45Zm112-45h55l54 45H284Z" fill="#344b5a"/><circle cx="120" cy="143" r="30" fill="#263440"/><circle cx="120" cy="143" r="15" fill="#d5dce0"/><circle cx="390" cy="143" r="30" fill="#263440"/><circle cx="390" cy="143" r="15" fill="#d5dce0"/></svg><small>Ilustrační náhled</small>`}</div><div class="vehicle-body">${badge(v.status)}<h2>${esc(v.brand)} ${esc(v.model)}</h2><p>${esc(v.year??'Rok neuveden')} · ${esc(v.transmission||'Převodovka neuvedena')}${v.power==null?'':' · '+esc(v.power)+' kW'}</p><p>⌖ ${esc(v.location||'Poloha k doplnění')}</p>${v.unavailableFrom?`<p class="availability-range">${esc(v.unavailableFrom)} → ${esc(v.unavailableTo)}</p>`:''}<div class="vehicle-price">${editable?`<b>${price(v.monthlyPrice)}</b>`:''}<span>Detail ↗</span></div></div></a>`).join('')||'<div class="card empty">Zatím žádná přidělená vozidla.</div>'}</div>`,
- bind(root){bindActions(root,{new:()=>vehicleEditor(null,editFields,refresh)})}};
+ bind(){}};
 }
 
 function vehicleEditor(vehicle,fields,refresh,unavailable=false){
@@ -33,4 +33,10 @@ function vehicleEditor(vehicle,fields,refresh,unavailable=false){
  const status=dialog.querySelector('[name=status]'),from=dialog.querySelector('[name=unavailableFrom]'),to=dialog.querySelector('[name=unavailableTo]');
  const sync=()=>{const show=status.value==='unavailable';for(const input of [from,to]){input.closest('label').hidden=!show;input.required=show;input.disabled=!show}to.min=from.value;};
  status.addEventListener('change',()=>{sync();if(status.value==='unavailable')from.focus()});from.addEventListener('change',sync);sync();if(unavailable)from.focus();
+}
+
+export function createVehicleOffer(user,onSaved){
+ if(!['owner','manager'].includes(user.role))throw Error('Nemáte oprávnění vytvářet vozidla.');
+ const offerFields=fields.map(f=>f.name==='status'?{...f,default:'unverified'}:f);
+ return vehicleEditor(null,offerFields,onSaved);
 }
