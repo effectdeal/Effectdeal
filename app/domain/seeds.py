@@ -1,4 +1,5 @@
 from .calculations import report_totals
+from .employees import profile
 
 def seed(store, tenant):
     datasets = {
@@ -19,6 +20,9 @@ def seed(store, tenant):
     }
     for kind, rows in datasets.items():
         for row in rows:
+            if kind == 'employees':
+                row=profile(row)
+                row['username']={'owner':'majitel','dispatcher':'dispecer','driver':'ridic'}[row['id']]
             if kind == 'reports': row['totals'] = report_totals(row, 0)
             if not store.get(tenant,kind,row['id']):
                 store.create(tenant,kind,row)
