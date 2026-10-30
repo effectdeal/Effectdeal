@@ -4,25 +4,32 @@ import secrets
 from datetime import datetime, timezone
 from uuid import uuid4
 from pathlib import Path
-from flask import Blueprint, current_app, g, jsonify, request, session, abort, Response
+from flask import Blueprint, current_app, g, jsonify, request, session, abort, Response, send_file
 from werkzeug.security import check_password_hash, generate_password_hash
 from ..domain.calculations import number, report_totals
 from ..domain.seeds import seed
 from ..domain.employees import profile, username
 from ..storage import Conflict
+from ..request_store import RequestStore
+from ..domain.fleet import vehicle_view, overlaps, valid_date, today
 
 api=Blueprint('api',__name__)
 KINDS={'employees','vehicles','customers','rentals','transfers','reports','notifications','handover','documents','service','invoices','payments'}
 ROLES={'owner','manager','dispatcher','employee'}
 STAFF={'owner','manager','dispatcher'}
-def store(): return current_app.extensions['store']
+def store():
+    if not hasattr(g,'request_store'):g.request_store=RequestStore(current_app.extensions['store'])
+    return g.request_store
 def now(): return datetime.now(timezone.utc).isoformat()
 def public(record,kind=None):
     if kind=='employees' or ('role' in record and 'email' in record):record=profile(record)
+    if kind=='vehicles':record=vehicle_view(record,store().list(g.tenant,'transfers'),store().list(g.tenant,'rentals'))
     r={k:v for k,v in record.items() if k not in ('passwordHash','password','content')}
     # Personal roles do not receive company prices, even in API responses.
     if getattr(g,'user',None) and g.user.get('role') not in STAFF and kind=='vehicles':
         for key in ('monthlyPrice','priceOriginal','promoLabel'):r.pop(key,None)
+        if r.get('activeTransferId') and not any(t['id']==r['activeTransferId'] and t.get('employeeId')==g.user['id'] for t in store().list(g.tenant,'transfers')):
+            r.pop('activeTransferId',None);r.pop('destination',None)
     return r
 def csrf():
     if request.method not in ('GET','HEAD','OPTIONS') and (not session.get('csrf') or request.headers.get('X-CSRF-Token')!=session.get('csrf')):
@@ -78,7 +85,7 @@ def writable(kind,r=None):
 
 FIELDS={
  'employees':{'name','firstName','lastName','phone','username','position','email','role','hourlyRate','available','latitude','longitude','locationConfirmedAt','disabled','password'},
- 'vehicles':{'brand','model','plate','vin','year','color','drive','fuel','transmission','power','equipment','description','status','monthlyPrice','location','latitude','longitude','odometer','defects','lastRentalEnd','profileDocumentId'},
+ 'vehicles':{'brand','model','plate','vin','year','color','drive','fuel','transmission','power','equipment','description','status','monthlyPrice','location','latitude','longitude','odometer','defects','lastRentalEnd','profileDocumentId','unavailableFrom','unavailableTo'},
  'customers':{'name','type','email','phone','address','companyId','note'},
  'rentals':{'customerId','vehicleId','start','end','monthlyPrice','deposit','status','note'},
  'transfers':{'rentalId','customerId','vehicleId','employeeId','from','to','date','time','status','type','note'},
@@ -122,9 +129,24 @@ def validate(kind,payload,old=None):
     if kind in ('vehicles','rentals') and role=='dispatcher':
         r['monthlyPrice']=(old or {}).get('monthlyPrice',0)
     if kind=='vehicles':
+        if 'location' in payload and payload['location']!=(old or {}).get('location'):r['locationUpdatedAt']=now()
         for key in ('brand','model') if r.get('sourceSystem')=='effectdeal.com' else ('brand','model','plate'):
             if not str(r.get(key,'')).strip():raise ValueError('Vyplňte značku, model a SPZ.')
         r.setdefault('status','available');r.setdefault('monthlyPrice',0)
+        if old and r['status'] in ('delivering','delivery_scheduled','inspecting') and r['status']==vehicle_view(old,store().list(g.tenant,'transfers'),store().list(g.tenant,'rentals'))['status']:r['status']=old['status']
+        if r['status'] not in ('unverified','available','rented','service','unavailable'):raise ValueError('Neplatný stav vozidla.')
+        if r['status']=='unavailable':
+            r['unavailableFrom']=valid_date(r.get('unavailableFrom'))
+            r['unavailableTo']=valid_date(r.get('unavailableTo'))
+            if r['unavailableTo']<r['unavailableFrom']:raise ValueError('Konec nedostupnosti nesmí být před začátkem.')
+            for task in store().list(g.tenant,'transfers'):
+                if task.get('vehicleId')==r.get('id') and task.get('status') in ('assigned','progress') and (task.get('status')=='progress' or overlaps(r,task.get('date') or today())):
+                    raise ValueError('V tomto období má vozidlo přidělený převoz. Nejdříve převoz přesuňte nebo zrušte.')
+            for rental in store().list(g.tenant,'rentals'):
+                if rental.get('vehicleId')==r.get('id') and rental.get('status') in ('reserved','active') and overlaps(r,rental.get('start',''),rental.get('end','')):
+                    raise ValueError('Nedostupnost se překrývá s pronájmem.')
+        else:
+            r.pop('unavailableFrom',None);r.pop('unavailableTo',None)
         if r['status']!='unverified' and not str(r.get('plate','')).strip():raise ValueError('Nejdříve doplňte skutečnou SPZ vozidla.')
         profile_id=r.get('profileDocumentId')
         if profile_id:
@@ -141,13 +163,21 @@ def validate(kind,payload,old=None):
         if vehicle.get('status')=='unverified':raise ValueError('Nejdříve doplňte a ověřte vozidlo z nabídky.')
         if not r.get('start') or not r.get('end') or r['end']<=r['start']:raise ValueError('Konec pronájmu musí být po začátku.')
         r.setdefault('status','reserved')
+        if r['status'] in ('reserved','active') and overlaps(vehicle,r['start'],r['end']):raise ValueError('Vozidlo je v tomto období nedostupné.')
     if kind=='transfers':
-        if not r.get('vehicleId') or not r.get('employeeId') or not r.get('from') or not r.get('to'):raise ValueError('Vyplňte vozidlo, zaměstnance a trasu.')
         rental=store().get(g.tenant,'rentals',r.get('rentalId',''))
         if rental:r['customerId']=rental['customerId'];r['vehicleId']=rental['vehicleId']
+        if not r.get('vehicleId') or not r.get('employeeId') or not r.get('from') or not r.get('to'):raise ValueError('Vyplňte vozidlo, zaměstnance a trasu.')
         vehicle=store().get(g.tenant,'vehicles',r['vehicleId'])
         if vehicle.get('status')=='unverified':raise ValueError('Nejdříve doplňte a ověřte vozidlo z nabídky.')
         r.setdefault('status','assigned')
+        if r['status'] not in ('assigned','progress','completed','cancelled'):raise ValueError('Neplatný stav převozu.')
+        if r['status'] in ('assigned','progress'):
+            if overlaps(vehicle,valid_date(r.get('date') or today())) or (r['status']=='progress' and overlaps(vehicle,today())):raise ValueError('Vozidlo je v tomto období nedostupné.')
+            if vehicle.get('status')=='service':raise ValueError('Vozidlo je v servisu.')
+            if r['status']=='progress' and any(t.get('vehicleId')==r['vehicleId'] and t['id']!=r.get('id') and t.get('status')=='progress' for t in store().list(g.tenant,'transfers')):raise ValueError('U vozidla již probíhá jiný převoz.')
+        if old and old.get('status')=='completed' and r['status']!='completed':raise ValueError('Dokončený převoz nelze znovu otevřít.')
+        if r['status']=='completed' and (not old or old.get('status')!='completed'):r['completedAt']=now()
         if old and old.get('reportId') and any(r.get(k)!=old.get(k) for k in ('employeeId','vehicleId','rentalId')):raise ValueError('Převoz již má výkaz. Přiřazení již nelze měnit.')
     if kind=='reports':
         if r.get('transferId'):
@@ -175,11 +205,11 @@ def validate(kind,payload,old=None):
     return r
 
 @api.get('/health')
-def health():return jsonify(status='ok',app='EFFECT DEAL',version='0.2.0')
+def health():return jsonify(status='ok',app='EFFECT DEAL',version='0.3.0')
 @api.get('/session')
 def session_info():
     session.setdefault('csrf',secrets.token_hex(24))
-    user=store().get(session.get('tenant',''), 'employees',session.get('user',''))
+    user=store().get(session.get('tenant',''), 'employees',session['user']) if session.get('user') else None
     return jsonify(user=public(user) if user and not user.get('disabled') and user.get('role') in ROLES else None,csrf=session['csrf'],mode=current_app.config['APP_MODE'])
 @api.post('/login')
 def login():
@@ -207,7 +237,17 @@ def logout():
 @login_required
 def listing(kind):
     if kind not in KINDS:abort(404)
-    rows=[public(r,kind) for r in store().list(g.tenant,kind) if scoped(kind,r)]
+    filters={}
+    if kind=='documents':
+        filters={k:request.args[k] for k in ('parentKind','parentId') if request.args.get(k)}
+    if kind=='service' and request.args.get('vehicleId'):filters['vehicleId']=request.args['vehicleId']
+    if kind=='handover' and request.args.get('transferId'):filters['transferId']=request.args['transferId']
+    if g.user['role']=='employee' and kind in ('reports','transfers','handover'):filters['employeeId']=g.user['id']
+    raw=store().list(g.tenant,kind,filters)
+    if kind=='documents' and not filters.get('parentId'):
+        for parent_kind in {r.get('parentKind') for r in raw} & {'vehicles','reports','employees','rentals','handover'}:
+            store().list(g.tenant,parent_kind)
+    rows=[public(r,kind) for r in raw if scoped(kind,r)]
     search=request.args.get('q','').lower();status=request.args.get('status');employee=request.args.get('employeeId')
     rows=[r for r in rows if (not search or search in str(r).lower()) and (not status or r.get('status')==status) and (not employee or r.get('employeeId')==employee)]
     if kind=='documents':
@@ -225,7 +265,7 @@ def create(kind):
     if kind not in FIELDS:abort(404)
     writable(kind);p=request.get_json() or {};r=validate(kind,p);r.update(id=uuid4().hex,createdAt=now(),updatedAt=now())
     r=store().create(g.tenant,kind,r)
-    return jsonify(public(r)),201
+    return jsonify(public(r,kind)),201
 @api.put('/<kind>/<id>')
 @login_required
 def update(kind,id):
@@ -233,7 +273,20 @@ def update(kind,id):
     old=get_record(kind,id);writable(kind,old);p=request.get_json() or {}
     if p.get('version')!=old['version']:raise Conflict('Záznam je zastaralý. Obnovte ho.')
     r=validate(kind,p,old);r['updatedAt']=now();r=store().update(g.tenant,kind,r,old['version'])
-    return jsonify(public(r))
+    return jsonify(public(r,kind))
+@api.post('/transfers/<id>/status')
+@login_required
+def transfer_status(id):
+    old=get_record('transfers',id);p=request.get_json() or {}
+    if p.get('version')!=old['version']:raise Conflict('Záznam je zastaralý. Obnovte ho.')
+    target=p.get('status')
+    allowed={'assigned':{'progress','cancelled'},'progress':{'completed','cancelled'}}
+    if target not in allowed.get(old.get('status'),set()):abort(409,description='Neplatný přechod stavu převozu.')
+    if g.user['role']=='employee' and target=='cancelled':abort(403)
+    record=validate('transfers',{'status':target},old);record['updatedAt']=now()
+    record=store().update(g.tenant,'transfers',record,old['version'])
+    return jsonify(public(record,'transfers'))
+
 @api.post('/transfers/<id>/report')
 @login_required
 def transfer_report(id):
@@ -293,7 +346,7 @@ def upload():
     signatures={'image/jpeg':content[:3]==b'\xff\xd8\xff','image/png':content[:8]==b'\x89PNG\r\n\x1a\n','application/pdf':content[:5]==b'%PDF-','image/webp':content[:4]==b'RIFF' and content[8:12]==b'WEBP'}
     if not signatures.get(mime):raise ValueError('Povolené soubory: JPG, PNG, WebP a PDF.')
     if kind=='vehicles' and mime=='application/pdf':raise ValueError('Fotografie vozidla musí být obrázek.')
-    count=sum(d.get('parentKind')==kind and d.get('parentId')==id for d in store().list(g.tenant,'documents'))
+    count=len(store().list(g.tenant,'documents',{'parentKind':kind,'parentId':id}))
     if count>=10:raise ValueError('Nejvýše 10 příloh na záznam.')
     # Files stay behind authenticated API; Mongo document is capped below 16 MB.
     r=store().create(g.tenant,'documents',{'id':uuid4().hex,'parentKind':kind,'parentId':id,'name':f.filename[:150],'mime':mime,'size':len(content),'createdAt':now(),'content':base64.b64encode(content).decode()})
@@ -308,10 +361,24 @@ def upload():
 @api.get('/documents/<id>/file')
 @login_required
 def document_file(id):
-    r=get_record('documents',id)
+    metadata=store().list(g.tenant,'documents',{'id':id})
+    if not metadata or not scoped('documents',metadata[0]):abort(404)
+    r=metadata[0]
     image=r['mime'] in ('image/jpeg','image/png','image/webp')
+    if image and request.args.get('size')=='thumb':
+        from ..image_cache import thumbnail_path
+        path=thumbnail_path(g.tenant,r,lambda:base64.b64decode(store().get(g.tenant,'documents',id)['content']))
+        if path:
+            response=send_file(path,mimetype='image/webp',conditional=True,max_age=0)
+            response.headers['Cache-Control']='private, no-cache'
+            return response
+    r=store().get(g.tenant,'documents',id)
     disposition='inline' if image and request.args.get('download')!='1' else 'attachment'
-    return Response(base64.b64decode(r['content']),mimetype=r['mime'],headers={'Content-Disposition':disposition+'; filename=document'})
+    response=Response(base64.b64decode(r['content']),mimetype=r['mime'],headers={'Content-Disposition':disposition+'; filename=document'})
+    response.set_etag(r['id']+'-'+str(r['version']))
+    response.make_conditional(request)
+    response.headers['Cache-Control']='no-store'
+    return response
 
 def catalog_directory():
     return Path(current_app.config.get('CATALOG_DIRECTORY',Path(current_app.root_path)/'data'))
@@ -323,9 +390,10 @@ def catalog_preview():
     from ..domain.catalog import read_catalog
     catalog=read_catalog(catalog_directory())
     items=[]
+    existing={v['id'] for v in store().list(g.tenant,'vehicles')}
     for item in catalog['items']:
         items.append({k:item.get(k) for k in ('id','sourceSlug','brand','model','year','monthlyPrice','sourceUrl')})
-        items[-1].update(photoCount=len(item['photos']),imported=bool(store().get(g.tenant,'vehicles',item['id'])))
+        items[-1].update(photoCount=len(item['photos']),imported=item['id'] in existing)
     return jsonify(items=items,fetchedAt=catalog['fetchedAt'],source=catalog['source'])
 
 @api.post('/catalog/effectdeal/<slug>/import')
@@ -337,6 +405,19 @@ def catalog_import(slug):
     source=next((r for r in catalog['items'] if r['sourceSlug']==slug),None)
     if source is None:abort(404)
     return jsonify(import_vehicle(store(),g.tenant,source,catalog_directory()))
+
+@api.get('/dashboard')
+@login_required
+def dashboard():
+    if g.user['role'] not in STAFF:abort(403)
+    vehicles=store().list(g.tenant,'vehicles')
+    transfers=store().list(g.tenant,'transfers')
+    reports=store().list(g.tenant,'reports')
+    mail=[r for r in store().list(g.tenant,'notifications') if scoped('notifications',r)]
+    recent=sorted(transfers,key=lambda r:r.get('updatedAt',r.get('createdAt','')),reverse=True)[:6]
+    return jsonify(vehicleCount=len(vehicles),activeTransfers=sum(t.get('status') not in ('completed','cancelled') for t in transfers),
+        pendingReports=sum(r.get('status')=='submitted' for r in reports),unread=sum(not n.get('read') for n in mail),
+        recentTransfers=[{k:r.get(k,'') for k in ('id','date','time','from','to','status')} for r in recent])
 
 @api.get('/me/summary')
 @login_required
