@@ -74,6 +74,7 @@ def writable(kind,r=None):
     role=g.user['role']
     if r and not scoped(kind,r): abort(404)
     if kind in ('notifications','documents'): abort(403)
+    if kind=='vehicles' and r is None and role not in ('owner','manager'):abort(403)
     if kind=='employees':
         if role not in ('owner','manager'): abort(403)
         if r and r.get('role')=='owner' and role!='owner': abort(403)
@@ -130,7 +131,7 @@ def validate(kind,payload,old=None):
         r['monthlyPrice']=(old or {}).get('monthlyPrice',0)
     if kind=='vehicles':
         if 'location' in payload and payload['location']!=(old or {}).get('location'):r['locationUpdatedAt']=now()
-        for key in ('brand','model') if r.get('sourceSystem')=='effectdeal.com' else ('brand','model','plate'):
+        for key in ('brand','model') if r.get('status')=='unverified' or r.get('sourceSystem')=='effectdeal.com' else ('brand','model','plate'):
             if not str(r.get(key,'')).strip():raise ValueError('Vyplňte značku, model a SPZ.')
         r.setdefault('status','available');r.setdefault('monthlyPrice',0)
         if old and r['status'] in ('delivering','delivery_scheduled','inspecting') and r['status']==vehicle_view(old,store().list(g.tenant,'transfers'),store().list(g.tenant,'rentals'))['status']:r['status']=old['status']
@@ -205,7 +206,7 @@ def validate(kind,payload,old=None):
     return r
 
 @api.get('/health')
-def health():return jsonify(status='ok',app='EFFECT DEAL',version='0.3.0')
+def health():return jsonify(status='ok',app='EFFECT DEAL',version='0.3.1')
 @api.get('/session')
 def session_info():
     session.setdefault('csrf',secrets.token_hex(24))
