@@ -193,3 +193,9 @@ input:focus,select:focus,textarea:focus { outline:2px solid #f97316; outline-off
 .top-logo { object-fit:contain; flex-shrink:0; }
 .topbar { gap:12px; }
 @media(max-width:760px) { .top-brand-name { display:none; } .topbar { gap:8px; } .top-logo { width:44px; height:44px; } .card p,.page-heading p { font-size:13px; line-height:1.65; } }
+/* Profile stays with the signed-in user; management belongs in Settings. */
+.user-profile-link { display:flex; align-items:center; gap:10px; flex:1; min-width:0; border-radius:8px; padding:5px; }
+.user-profile-link:hover,.user-profile-link:focus-visible { background:#27272a; outline:2px solid #f97316; }
+.user-profile-link>span:last-child { min-width:0; overflow-wrap:anywhere; }
+.user-profile-link small { display:block; }
+.settings-tabs { display:flex; gap:10px; flex-wrap:wrap; margin:0 0 24px; }
